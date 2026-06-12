@@ -6,6 +6,7 @@ function onOpen() {
   ui.createMenu('🚀 產生 SQL 更新語法')
       .addItem('產生 Service 新增或修改語法 (新增優先)', 'generateSQLInsert')
       .addItem('產生 Fal 帳單 Insert 語法', 'generateFalExternalCostsSQL')
+      .addItem('產生 Seedance 帳單 Insert 語法', 'generateSeedanceExternalCostsSQL')
       .addItem('產生 Runpod 帳單 Insert 語法 (New, 解析選取範圍)', 'generateRunpodExternalCostsSQL')
       .addItem('產生 Runpod 帳單 Insert 語法 (Legacy)', 'generateRunpodExternalCostsSQLLegacy')
       .addItem('產生 AWS SSM CLI for member limit 語法', 'generateAwsSsmCli')
@@ -254,6 +255,108 @@ function generateFalExternalCostsSQL() {
 
    
 													
+function generateSeedanceExternalCostsSQL() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sourceSheet = ss.getSheetByName("Seedance - source");
+  const mappingSheet = ss.getSheetByName("Seedance - mapping");
+  
+  if (!sourceSheet || !mappingSheet) {
+    SpreadsheetApp.getUi().alert("找不到 'Seedance - source' 或 'Seedance - mapping' 工作表。");
+    return;
+  }
+
+  // 讀取 mapping 表：appId → queueGroup
+  const mappingData = mappingSheet.getDataRange().getValues();
+  let idToQueue = {};
+  mappingData.slice(1).forEach(row => {
+    let appId = String(row[0]).trim();
+    if (appId) idToQueue[appId] = row[1];
+  });
+
+  // 讀取 source 表，按 queueGroup 加總金額
+  const sourceData = sourceSheet.getDataRange().getValues();
+  let groupTotals = {};
+  let unmatchedItems = [];
+
+  sourceData.slice(1).forEach((row, index) => {
+    const appId = String(row[0]).trim();
+    const amount = parseFloat(row[1]);
+
+    if (!amount || isNaN(amount) || amount === 0) return;
+
+    const queueGroup = idToQueue[appId];
+    if (queueGroup) {
+      groupTotals[queueGroup] = (groupTotals[queueGroup] || 0) + amount;
+    } else {
+      unmatchedItems.push(`- ${appId}: $${amount} (列號: ${index + 2})`);
+    }
+  });
+
+  if (unmatchedItems.length > 0) {
+    SpreadsheetApp.getUi().alert("⚠ 發現未對應項目\n\n" + unmatchedItems.join("\n"));
+    return;
+  }
+
+  // 計算上個月最後一天 23:59:59
+  const now = new Date();
+  const lastDayOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+  const formattedDate = Utilities.formatDate(lastDayOfLastMonth, "GMT+8", "yyyy-MM-dd HH:mm:ss");
+
+  let sqlStatements = [];
+  let sqlRowsForSheet = [];
+  let previewRowsForSheet = [];
+
+  for (let queueGroup in groupTotals) {
+    const totalAmount = parseFloat(groupTotals[queueGroup].toFixed(4));
+    const sql = `INSERT INTO [Reallusion].[dbo].[DA_External_Costs] ([Time], [QueueGroup], [Amount], [Currency], [Provider]) VALUES ('${formattedDate}', '${queueGroup}', ${totalAmount.toFixed(4)}, 'USD', 'Seedance');`;
+
+    sqlStatements.push(sql);
+    sqlRowsForSheet.push([sql]);
+
+    // 儲存預覽明細：[Time, QueueGroup, Amount, Currency, Provider]
+    previewRowsForSheet.push([formattedDate, queueGroup, totalAmount, 'USD', 'Seedance']);
+  }
+
+  if (sqlStatements.length > 0) {
+    // 1. 彈出視窗顯示 SQL
+    showOutputDialog(sqlStatements.join('\n'));
+
+    // ==== 寫入 source 工作表下方 ====
+    let currentLastRow = sourceSheet.getLastRow();
+
+    // 功能 A：建立「SQL 執行結果預覽表」(欄位拆開)
+    let previewStartRow = currentLastRow + 4; // 原資料下方空 3 行
+
+    sourceSheet.getRange(previewStartRow, 1)
+               .setValue("📊 SQL 執行結果預覽 (數據時間: " + formattedDate + ")")
+               .setFontWeight("bold")
+               .setBackground("#d9ead3");
+
+    const headers = [["[Time]", "[QueueGroup]", "[Amount]", "[Currency]", "[Provider]"]];
+    sourceSheet.getRange(previewStartRow + 1, 1, 1, 5)
+               .setValues(headers)
+               .setFontWeight("bold")
+               .setBackground("#f3f3f3");
+
+    sourceSheet.getRange(previewStartRow + 2, 1, previewRowsForSheet.length, 5)
+               .setValues(previewRowsForSheet);
+
+    // 功能 B：建立「SQL 完整指令列表」(方便整包複製)
+    currentLastRow = sourceSheet.getLastRow();
+    let sqlStartRow = currentLastRow + 3;
+
+    sourceSheet.getRange(sqlStartRow, 1)
+               .setValue("📜 產生的 SQL 原始指令列表")
+               .setFontWeight("bold")
+               .setBackground("#e6f2ff");
+
+    sourceSheet.getRange(sqlStartRow + 1, 1, sqlRowsForSheet.length, 1)
+               .setValues(sqlRowsForSheet);
+  }
+}
+
+   
+													
 /** (Legacy) 用 end-point mapping */   
 function generateRunpodExternalCostsSQLLegacy() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -476,10 +579,10 @@ function generateAwsSsmCli() {
   // 從第 4 列開始 (Index 3)，截圖顯示資料從此開始
   for (let i = 3; i < data.length; i++) {
     const serviceType = String(data[i][0]).trim(); // A 欄 (Index 0)
-    const freeValueRaw = data[i][21];              // V 欄 (Index 21) -> Free
-    const paidValueRaw = data[i][22];              // W 欄 (Index 22) -> Paid
+    const freeValueRaw = data[i][22];              // W 欄 (Index 22) -> Free
+    const paidValueRaw = data[i][23];              // X 欄 (Index 23) -> Paid
 
-    // 只要 V 或 W 其中一個有值，且 ServiceType 不為空才處理
+    // 只要 W 或 X 其中一個有值，且 ServiceType 不為空才處理
     if (!serviceType || (paidValueRaw === "" && freeValueRaw === "")) {
       continue;
     }
@@ -494,12 +597,12 @@ function generateAwsSsmCli() {
       serviceSection.push(`# ========== ${env.toUpperCase()} 環境 ==========`);
       serviceSection.push(`echo "設定 ${env.toUpperCase()} 環境..."`);
       
-      // 處理 Paid 參數 (對應原本 W 欄的值)
+      // 處理 Paid 參數 (對應原本 X 欄的值)
       if (paidValue !== null) {
         serviceSection.push(`aws ssm put-parameter --name "/RLAdaptor/${env}/ConcurrencyLimit/Service${serviceType}/Paid" --value "${paidValue}" --type "String" --overwrite`);
       }
       
-      // 處理 Free 參數 (對應原本 V 欄的值)
+      // 處理 Free 參數 (對應原本 W 欄的值)
       if (freeValue !== null) {
         serviceSection.push(`aws ssm put-parameter --name "/RLAdaptor/${env}/ConcurrencyLimit/Service${serviceType}/Free" --value "${freeValue}" --type "String" --overwrite`);
       }
@@ -515,7 +618,7 @@ function generateAwsSsmCli() {
     const finalOutput = allCliCommands.join('\n\n');
     showAwsCliModal(finalOutput);
   } else {
-    SpreadsheetApp.getUi().alert("找不到符合條件的資料，請檢查 A 欄是否有 ServiceType，且 V 或 W 欄是否有數值。");
+    SpreadsheetApp.getUi().alert("找不到符合條件的資料，請檢查 A 欄是否有 ServiceType，且 W 或 X 欄是否有數值。");
   }
 }
 
@@ -547,10 +650,10 @@ function generateQueueGroupCli() {
 
   // 根據截圖，資料從第 4 列開始 (Index 3)
   for (let i = 3; i < data.length; i++) {
-    const queueGroupId = String(data[i][13]).trim(); // N 欄 (Index 13)
-    const globalValueRaw = data[i][20];              // U 欄 (Index 20)
+    const queueGroupId = String(data[i][14]).trim(); // O 欄 (Index 14)
+    const globalValueRaw = data[i][21];              // V 欄 (Index 21)
 
-    // 檢查 N 欄位是否有值且為數字，且 U 欄位不為空
+    // 檢查 O 欄位是否有值且為數字，且 V 欄位不為空
     if (!queueGroupId || isNaN(queueGroupId) || globalValueRaw === "") {
       continue;
     }
@@ -578,7 +681,7 @@ function generateQueueGroupCli() {
     const header = "# AWS Parameter Store 設定命令 - QueueGroup ConcurrencyLimit 配置\n# RLAdaptor QueueGroup 併發限制參數設定\n\n";
     showAwsCliModal(header + allCliCommands.join('\n\n'));
   } else {
-    SpreadsheetApp.getUi().alert("找不到符合條件的資料，請檢查 M 欄是否為 QueueGroup ID 數字，且 T 欄是否有對應數值。");
+    SpreadsheetApp.getUi().alert("找不到符合條件的資料，請檢查 O 欄是否為 QueueGroup ID 數字，且 V 欄是否有對應數值。");
   }
 }
 
