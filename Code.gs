@@ -10,7 +10,7 @@ function onOpen() {
       .addItem('產生 Runpod 帳單 Insert 語法 (New, 解析選取範圍)', 'generateRunpodExternalCostsSQL')
       .addItem('產生 Runpod 帳單 Insert 語法 (Legacy)', 'generateRunpodExternalCostsSQLLegacy')
       .addItem('產生 AWS SSM CLI for member limit 語法', 'generateAwsSsmCli')
-      .addItem('產生 AWS SSM CLI for global limit 語法', 'generateQueueGroupCli')      
+      .addItem('產生 AWS SSM CLI for global limit 語法' (從 Finalized sheet), 'generateQueueGroupCli')      
       .addToUi();
 }
 
