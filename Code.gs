@@ -10,7 +10,7 @@ function onOpen() {
       .addItem('產生 Runpod 帳單 Insert 語法 (New, 解析選取範圍)', 'generateRunpodExternalCostsSQL')
       .addItem('產生 Runpod 帳單 Insert 語法 (Legacy)', 'generateRunpodExternalCostsSQLLegacy')
       .addItem('產生 AWS SSM CLI for member limit 語法', 'generateAwsSsmCli')
-      .addItem('產生 AWS SSM CLI for global limit 語法' (從 Finalized sheet), 'generateQueueGroupCli')      
+      .addItem('產生 AWS SSM CLI for global limit 語法 (從 Finalized sheet)', 'generateQueueGroupCli')      
       .addToUi();
 }
 
@@ -25,9 +25,10 @@ function generateSQLInsert() {
     0: "ServiceType", 1: "Provider", 2: "Queue Group", 3: "AP",
     4: "RLproductid", 5: "Dummy PID", 6: "Product Name",
     8: "ChargeType", 9: "Amount", 
-    10: "Minlevel",   // 新增欄位 (對應 DB 的 MinMemberTier)
-    11: "ToAdd",     // Index 順延
-    12: "ToUpdate"   // Index 順延
+    10: "Minlevel",   // 對應 DB 的 MinMemberTier
+    11: "IsPreview",  // 對應 DB 的 IsPreviewProduct
+    12: "ToAdd",      // Index 順延
+    13: "ToUpdate"    // Index 順延
   };
 
   var errors = [];
@@ -50,11 +51,11 @@ function generateSQLInsert() {
 
   for (var i = 3; i < data.length; i++) {
     var row = data[i];
-    if (!row || row.length < 13) continue; // 確保有足夠的欄位長度
+    if (!row || row.length < 14) continue; // 確保有足夠的欄位長度
 
     // 依照新的 Index 抓取資料
-    var toAddValue = row[11] ? row[11].toString().trim() : "";    
-    var toUpdateValue = row[12] ? row[12].toString().trim() : ""; 
+    var toAddValue = row[12] ? row[12].toString().trim() : "";    
+    var toUpdateValue = row[13] ? row[13].toString().trim() : ""; 
 
     if (row[0] !== "") lastValues.st = row[0];
     if (row[1] !== "") lastValues.prov = row[1];
@@ -77,6 +78,9 @@ function generateSQLInsert() {
     
     // 抓取 MinMemberTier，若為空值則預設為 1
     var minMemberTier = (row[10] === "" || row[10] === null) ? 1 : row[10];
+    // 抓取 IsPreviewProduct，bit 欄位只輸出 0 或 1
+    var isPreviewRaw = (row[11] === null || row[11] === undefined) ? "" : row[11].toString().trim();
+    var isPreviewProduct = (row[11] === 1 || row[11] === true || isPreviewRaw === "1") ? 1 : 0;
 
     if (!rlProductId) continue;
 
@@ -87,16 +91,16 @@ function generateSQLInsert() {
 
     var sql = "";
     if (toAddValue !== "") {
-      // INSERT 語法更新：將原本寫死的 1 改為 minMemberTier 變數
+      // INSERT 語法更新：加入 minMemberTier 與 isPreviewProduct 變數
       sql = "INSERT INTO [Reallusion].[dbo].[DA_External_Service] " +
-            "([ServiceType], [QueueGroup], [Provider], [AP], [RLProductID], [DummyPID], [ProductName], [ChargeType], [Amount], [MinMemberTier], [HealthyStatus], [ServiceStatus]) " +
+            "([ServiceType], [QueueGroup], [Provider], [AP], [RLProductID], [DummyPID], [ProductName], [ChargeType], [Amount], [MinMemberTier], [IsPreviewProduct], [HealthyStatus], [ServiceStatus]) " +
             "VALUES (" +
             "'" + clean(serviceType) + "', '" + clean(queueGroup) + "', '" + clean(provider) + "', '" + clean(ap) + "', " + 
             "'" + clean(rlProductId) + "', '" + clean(dummyPid) + "', '" + clean(productName) + "', " + 
-            chargeType + ", " + amount + ", " + minMemberTier + ", 1, 1);";
+            chargeType + ", " + amount + ", " + minMemberTier + ", " + isPreviewProduct + ", 1, 1);";
     } 
     else if (toUpdateValue !== "") {
-      // UPDATE 語法更新：加入 [MinMemberTier] 更新邏輯
+      // UPDATE 語法更新：加入 [MinMemberTier] 與 [IsPreviewProduct] 更新邏輯
       sql = "UPDATE [Reallusion].[dbo].[DA_External_Service] SET " +
             "[ServiceType] = '" + clean(serviceType) + "', " +
             "[QueueGroup] = '" + clean(queueGroup) + "', " +
@@ -106,7 +110,8 @@ function generateSQLInsert() {
             "[ProductName] = '" + clean(productName) + "', " +
             "[ChargeType] = " + chargeType + ", " +
             "[Amount] = " + amount + ", " +
-            "[MinMemberTier] = " + minMemberTier + " " +
+            "[MinMemberTier] = " + minMemberTier + ", " +
+            "[IsPreviewProduct] = " + isPreviewProduct + " " +
             "WHERE [RLProductID] = '" + clean(rlProductId) + "';";
     }
 
