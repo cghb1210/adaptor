@@ -8,6 +8,7 @@ function onOpen() {
       .addItem('產生 Fal 帳單 Insert 語法', 'generateFalExternalCostsSQL')
       .addItem('產生 Seedance 帳單 Insert 語法', 'generateSeedanceExternalCostsSQL')
       .addItem('產生 Runpod 帳單 Insert 語法 (New, 解析選取範圍)', 'generateRunpodExternalCostsSQL')
+      .addItem('產生 Tencent 帳單 Insert 語法', 'generateTencentExternalCostsSQL')
       .addItem('產生 Runpod 帳單 Insert 語法 (Legacy)', 'generateRunpodExternalCostsSQLLegacy')
       .addItem('產生 AWS SSM CLI for member limit 語法', 'generateAwsSsmCli')
       .addItem('產生 AWS SSM CLI for global limit 語法 (從 Finalized sheet)', 'generateQueueGroupCli')      
@@ -320,6 +321,107 @@ function generateSeedanceExternalCostsSQL() {
 
     // 儲存預覽明細：[Time, QueueGroup, Amount, Currency, Provider]
     previewRowsForSheet.push([formattedDate, queueGroup, totalAmount, 'USD', 'Seedance']);
+  }
+
+  if (sqlStatements.length > 0) {
+    // 1. 彈出視窗顯示 SQL
+    showOutputDialog(sqlStatements.join('\n'));
+
+    // ==== 寫入 source 工作表下方 ====
+    let currentLastRow = sourceSheet.getLastRow();
+
+    // 功能 A：建立「SQL 執行結果預覽表」(欄位拆開)
+    let previewStartRow = currentLastRow + 4; // 原資料下方空 3 行
+
+    sourceSheet.getRange(previewStartRow, 1)
+               .setValue("📊 SQL 執行結果預覽 (數據時間: " + formattedDate + ")")
+               .setFontWeight("bold")
+               .setBackground("#d9ead3");
+
+    const headers = [["[Time]", "[QueueGroup]", "[Amount]", "[Currency]", "[Provider]"]];
+    sourceSheet.getRange(previewStartRow + 1, 1, 1, 5)
+               .setValues(headers)
+               .setFontWeight("bold")
+               .setBackground("#f3f3f3");
+
+    sourceSheet.getRange(previewStartRow + 2, 1, previewRowsForSheet.length, 5)
+               .setValues(previewRowsForSheet);
+
+    // 功能 B：建立「SQL 完整指令列表」(方便整包複製)
+    currentLastRow = sourceSheet.getLastRow();
+    let sqlStartRow = currentLastRow + 3;
+
+    sourceSheet.getRange(sqlStartRow, 1)
+               .setValue("📜 產生的 SQL 原始指令列表")
+               .setFontWeight("bold")
+               .setBackground("#e6f2ff");
+
+    sourceSheet.getRange(sqlStartRow + 1, 1, sqlRowsForSheet.length, 1)
+               .setValues(sqlRowsForSheet);
+  }
+}
+
+
+function generateTencentExternalCostsSQL() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sourceSheet = ss.getSheetByName("Tencent - source");
+  const mappingSheet = ss.getSheetByName("Tencent - mapping");
+  
+  if (!sourceSheet || !mappingSheet) {
+    SpreadsheetApp.getUi().alert("找不到 'Tencent - source' 或 'Tencent - mapping' 工作表。");
+    return;
+  }
+
+  // 讀取 mapping 表：operatorUin → queueGroup
+  const mappingData = mappingSheet.getDataRange().getValues();
+  let idToQueue = {};
+  mappingData.slice(1).forEach(row => {
+    let operatorUin = String(row[0]).trim();
+    if (operatorUin) idToQueue[operatorUin] = row[1];
+  });
+
+  // 讀取 source 表，按 queueGroup 加總金額
+  const sourceData = sourceSheet.getDataRange().getValues();
+  let groupTotals = {};
+  let unmatchedItems = [];
+
+  sourceData.slice(1).forEach((row, index) => {
+    const operatorUin = String(row[0]).trim();
+    const amount = parseFloat(row[1]);
+
+    if (!amount || isNaN(amount) || amount === 0) return;
+
+    const queueGroup = idToQueue[operatorUin];
+    if (queueGroup) {
+      groupTotals[queueGroup] = (groupTotals[queueGroup] || 0) + amount;
+    } else {
+      unmatchedItems.push(`- ${operatorUin}: $${amount} (列號: ${index + 2})`);
+    }
+  });
+
+  if (unmatchedItems.length > 0) {
+    SpreadsheetApp.getUi().alert("⚠ 發現未對應項目\n\n" + unmatchedItems.join("\n"));
+    return;
+  }
+
+  // 計算上個月最後一天 23:59:59
+  const now = new Date();
+  const lastDayOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+  const formattedDate = Utilities.formatDate(lastDayOfLastMonth, "GMT+8", "yyyy-MM-dd HH:mm:ss");
+
+  let sqlStatements = [];
+  let sqlRowsForSheet = [];
+  let previewRowsForSheet = [];
+
+  for (let queueGroup in groupTotals) {
+    const totalAmount = parseFloat(groupTotals[queueGroup].toFixed(4));
+    const sql = `INSERT INTO [Reallusion].[dbo].[DA_External_Costs] ([Time], [QueueGroup], [Amount], [Currency], [Provider]) VALUES ('${formattedDate}', '${queueGroup}', ${totalAmount.toFixed(4)}, 'USD', 'Tencent');`;
+
+    sqlStatements.push(sql);
+    sqlRowsForSheet.push([sql]);
+
+    // 儲存預覽明細：[Time, QueueGroup, Amount, Currency, Provider]
+    previewRowsForSheet.push([formattedDate, queueGroup, totalAmount, 'USD', 'Tencent']);
   }
 
   if (sqlStatements.length > 0) {
