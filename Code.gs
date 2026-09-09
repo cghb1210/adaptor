@@ -673,7 +673,7 @@ function showOutputModal(title, content) {
 
 /**
  * 產生 AWS SSM Parameter Store 的 CLI 語法
- * 修正點：V 欄對應 Free, W 欄對應 Paid (修正先前放反的問題)
+ * X 欄對應 Free，Y 欄對應 Paid
  */
 function generateAwsSsmCli() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -686,10 +686,10 @@ function generateAwsSsmCli() {
   // 從第 4 列開始 (Index 3)，截圖顯示資料從此開始
   for (let i = 3; i < data.length; i++) {
     const serviceType = String(data[i][0]).trim(); // A 欄 (Index 0)
-    const freeValueRaw = data[i][22];              // W 欄 (Index 22) -> Free
-    const paidValueRaw = data[i][23];              // X 欄 (Index 23) -> Paid
+    const freeValueRaw = data[i][23];              // X 欄 (Index 23) -> Free
+    const paidValueRaw = data[i][24];              // Y 欄 (Index 24) -> Paid
 
-    // 只要 W 或 X 其中一個有值，且 ServiceType 不為空才處理
+    // 只要 X 或 Y 其中一個有值，且 ServiceType 不為空才處理
     if (!serviceType || (paidValueRaw === "" && freeValueRaw === "")) {
       continue;
     }
@@ -704,12 +704,12 @@ function generateAwsSsmCli() {
       serviceSection.push(`# ========== ${env.toUpperCase()} 環境 ==========`);
       serviceSection.push(`echo "設定 ${env.toUpperCase()} 環境..."`);
       
-      // 處理 Paid 參數 (對應原本 X 欄的值)
+      // 處理 Paid 參數 (對應 Y 欄的值)
       if (paidValue !== null) {
         serviceSection.push(`aws ssm put-parameter --name "/RLAdaptor/${env}/ConcurrencyLimit/Service${serviceType}/Paid" --value "${paidValue}" --type "String" --overwrite`);
       }
       
-      // 處理 Free 參數 (對應原本 W 欄的值)
+      // 處理 Free 參數 (對應 X 欄的值)
       if (freeValue !== null) {
         serviceSection.push(`aws ssm put-parameter --name "/RLAdaptor/${env}/ConcurrencyLimit/Service${serviceType}/Free" --value "${freeValue}" --type "String" --overwrite`);
       }
@@ -725,7 +725,7 @@ function generateAwsSsmCli() {
     const finalOutput = allCliCommands.join('\n\n');
     showAwsCliModal(finalOutput);
   } else {
-    SpreadsheetApp.getUi().alert("找不到符合條件的資料，請檢查 A 欄是否有 ServiceType，且 W 或 X 欄是否有數值。");
+    SpreadsheetApp.getUi().alert("找不到符合條件的資料，請檢查 A 欄是否有 ServiceType，且 X 或 Y 欄是否有數值。");
   }
 }
 
@@ -745,7 +745,7 @@ function showAwsCliModal(content) {
 
 /**
  * 產生 QueueGroup SSM Parameter Store 的 CLI 語法
- * 依據 M 欄 (Queue Group ID) 與 T 欄 (Global Value) 產出
+ * 依據 P 欄 (Queue Group ID) 與 W 欄 (Global Value) 產出
  */
 function generateQueueGroupCli() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -757,10 +757,10 @@ function generateQueueGroupCli() {
 
   // 根據截圖，資料從第 4 列開始 (Index 3)
   for (let i = 3; i < data.length; i++) {
-    const queueGroupId = String(data[i][14]).trim(); // O 欄 (Index 14)
-    const globalValueRaw = data[i][21];              // V 欄 (Index 21)
+    const queueGroupId = String(data[i][15]).trim(); // P 欄 (Index 15)
+    const globalValueRaw = data[i][22];              // W 欄 (Index 22)
 
-    // 檢查 O 欄位是否有值且為數字，且 V 欄位不為空
+    // 檢查 P 欄位是否有值且為數字，且 W 欄位不為空
     if (!queueGroupId || isNaN(queueGroupId) || globalValueRaw === "") {
       continue;
     }
@@ -788,7 +788,7 @@ function generateQueueGroupCli() {
     const header = "# AWS Parameter Store 設定命令 - QueueGroup ConcurrencyLimit 配置\n# RLAdaptor QueueGroup 併發限制參數設定\n\n";
     showAwsCliModal(header + allCliCommands.join('\n\n'));
   } else {
-    SpreadsheetApp.getUi().alert("找不到符合條件的資料，請檢查 O 欄是否為 QueueGroup ID 數字，且 V 欄是否有對應數值。");
+    SpreadsheetApp.getUi().alert("找不到符合條件的資料，請檢查 P 欄是否為 QueueGroup ID 數字，且 W 欄是否有對應數值。");
   }
 }
 
