@@ -48,7 +48,10 @@ function generateSQLInsert() {
   }
 
   var sqlStatements = [];
-  var lastValues = { st: "", prov: "", qg: "", ap: "", dpid: "", pn: "" };
+  var lastValues = {
+    st: "", prov: "", qg: "", ap: "", dpid: "", pn: "",
+    ct: 0, amt: 0, mmt: 1, ipp: 0
+  };
 
   for (var i = 3; i < data.length; i++) {
     var row = data[i];
@@ -64,6 +67,13 @@ function generateSQLInsert() {
     if (row[3] !== "") lastValues.ap = row[3];
     if (row[5] !== "") lastValues.dpid = row[5];
     if (row[6] !== "") lastValues.pn = row[6];
+    if (row[8] !== "" && row[8] !== null) lastValues.ct = row[8];
+    if (row[9] !== "" && row[9] !== null) lastValues.amt = row[9];
+    if (row[10] !== "" && row[10] !== null) lastValues.mmt = row[10];
+    if (row[11] !== "" && row[11] !== null && row[11] !== undefined) {
+      var isPreviewRaw = row[11].toString().trim();
+      lastValues.ipp = (row[11] === 1 || row[11] === true || isPreviewRaw === "1") ? 1 : 0;
+    }
 
     if (toAddValue === "" && toUpdateValue === "") continue;
 
@@ -74,14 +84,11 @@ function generateSQLInsert() {
     var rlProductId = (row[4] !== null && row[4] !== "") ? row[4].toString().trim() : "";
     var dummyPid    = (row[5] !== "" ? row[5] : lastValues.dpid).toString().trim();
     var productName = (row[6] !== "" ? row[6] : lastValues.pn).toString().trim();
-    var chargeType  = (row[8] === "" || row[8] === null) ? 0 : row[8];
-    var amount      = (row[9] === "" || row[9] === null) ? 0 : row[9];
-    
-    // 抓取 MinMemberTier，若為空值則預設為 1
-    var minMemberTier = (row[10] === "" || row[10] === null) ? 1 : row[10];
-    // 抓取 IsPreviewProduct，bit 欄位只輸出 0 或 1
-    var isPreviewRaw = (row[11] === null || row[11] === undefined) ? "" : row[11].toString().trim();
-    var isPreviewProduct = (row[11] === 1 || row[11] === true || isPreviewRaw === "1") ? 1 : 0;
+    // 以下四個欄位若當列空白，沿用上一列；第一筆空白時使用初始化預設值
+    var chargeType      = lastValues.ct;
+    var amount          = lastValues.amt;
+    var minMemberTier   = lastValues.mmt;
+    var isPreviewProduct = lastValues.ipp;
 
     if (!rlProductId) continue;
 
