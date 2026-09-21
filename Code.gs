@@ -17,7 +17,15 @@ function onOpen() {
 
 
 function generateSQLInsert() {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getActiveSheet();
+  var outputSheet = ss.getSheetByName("Price Output");
+
+  if (!outputSheet) {
+    SpreadsheetApp.getUi().alert("找不到 'Price Output' 工作表。");
+    return;
+  }
+
   var data = sheet.getDataRange().getValues();
   var headers = data[2]; // 第 3 列 (Index 2)
   
@@ -48,6 +56,8 @@ function generateSQLInsert() {
   }
 
   var sqlStatements = [];
+  var sqlRowsForSheet = [];
+  var previewRowsForSheet = [];
   var lastValues = {
     st: "", prov: "", qg: "", ap: "", dpid: "", pn: "",
     ct: 0, amt: 0, mmt: 1, ipp: 0
@@ -101,11 +111,11 @@ function generateSQLInsert() {
     if (toAddValue !== "") {
       // INSERT 語法更新：加入 minMemberTier 與 isPreviewProduct 變數
       sql = "INSERT INTO [Reallusion].[dbo].[DA_External_Service] " +
-            "([ServiceType], [QueueGroup], [Provider], [AP], [RLProductID], [DummyPID], [ProductName], [ChargeType], [Amount], [MinMemberTier], [IsPreviewProduct], [HealthyStatus], [ServiceStatus]) " +
+            "([ServiceType], [QueueGroup], [Provider], [AP], [RLProductID], [DummyPID], [ProductName], [ChargeType], [Amount], [MinMemberTier], [HealthyStatus], [ServiceStatus], [IsPreviewProduct]) " +
             "VALUES (" +
             "'" + clean(serviceType) + "', '" + clean(queueGroup) + "', '" + clean(provider) + "', '" + clean(ap) + "', " + 
             "'" + clean(rlProductId) + "', '" + clean(dummyPid) + "', '" + clean(productName) + "', " + 
-            chargeType + ", " + amount + ", " + minMemberTier + ", " + isPreviewProduct + ", 1, 1);";
+            chargeType + ", " + amount + ", " + minMemberTier + ", 1, 1, " + isPreviewProduct + ");";
     } 
     else if (toUpdateValue !== "") {
       // UPDATE 語法更新：加入 [MinMemberTier] 與 [IsPreviewProduct] 更新邏輯
@@ -123,11 +133,83 @@ function generateSQLInsert() {
             "WHERE [RLProductID] = '" + clean(rlProductId) + "';";
     }
 
-    if (sql !== "") sqlStatements.push(sql);
+    if (sql !== "") {
+      sqlStatements.push(sql);
+      sqlRowsForSheet.push([sql]);
+
+      // INSERT 的狀態固定為 1；UPDATE 不變更這兩個欄位
+      var healthyStatusPreview = toAddValue !== "" ? 1 : "不變";
+      var serviceStatusPreview = toAddValue !== "" ? 1 : "不變";
+
+      // 欄位順序與 DA_External_Service 資料表一致
+      previewRowsForSheet.push([
+        serviceType,
+        queueGroup,
+        provider,
+        ap,
+        rlProductId,
+        dummyPid,
+        productName,
+        chargeType,
+        amount,
+        minMemberTier,
+        healthyStatusPreview,
+        serviceStatusPreview,
+        isPreviewProduct
+      ]);
+    }
   }
 
   if (sqlStatements.length > 0) {
     showOutputDialog(sqlStatements.join('\n\n'));
+
+    // ==== 寫入 Price Output 工作表 ====
+    var currentLastRow = outputSheet.getLastRow();
+    var previewStartRow = currentLastRow + 4; // 既有資料下方空 3 行
+
+    outputSheet.getRange(previewStartRow, 1)
+               .setValue("📊 Service SQL 執行結果預覽")
+               .setFontWeight("bold")
+               .setBackground("#d9ead3");
+
+    var previewHeaders = [[
+      "[ServiceType]",
+      "[QueueGroup]",
+      "[Provider]",
+      "[AP]",
+      "[RLProductID]",
+      "[DummyPID]",
+      "[ProductName]",
+      "[ChargeType]",
+      "[Amount]",
+      "[MinMemberTier]",
+      "[HealthyStatus]",
+      "[ServiceStatus]",
+      "[IsPreviewProduct]"
+    ]];
+
+    outputSheet.getRange(previewStartRow + 1, 1, 1, previewHeaders[0].length)
+               .setValues(previewHeaders)
+               .setFontWeight("bold")
+               .setBackground("#f3f3f3");
+
+    outputSheet.getRange(
+      previewStartRow + 2,
+      1,
+      previewRowsForSheet.length,
+      previewHeaders[0].length
+    ).setValues(previewRowsForSheet);
+
+    currentLastRow = outputSheet.getLastRow();
+    var sqlStartRow = currentLastRow + 3; // 預覽表下方空 2 行
+
+    outputSheet.getRange(sqlStartRow, 1)
+               .setValue("📜 產生的 Service SQL 原始指令列表")
+               .setFontWeight("bold")
+               .setBackground("#e6f2ff");
+
+    outputSheet.getRange(sqlStartRow + 1, 1, sqlRowsForSheet.length, 1)
+               .setValues(sqlRowsForSheet);
   } else {
     SpreadsheetApp.getUi().alert("未偵測到需要處理的資料。");
   }							
