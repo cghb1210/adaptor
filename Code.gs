@@ -138,8 +138,8 @@ function generateSQLInsert() {
       sqlRowsForSheet.push([sql]);
 
       // INSERT 的狀態固定為 1；UPDATE 不變更這兩個欄位
-      var healthyStatusPreview = toAddValue !== "" ? 1 : "不變";
-      var serviceStatusPreview = toAddValue !== "" ? 1 : "不變";
+      var healthyStatusPreview = toAddValue !== "" ? 1 : "Keep-current";
+      var serviceStatusPreview = toAddValue !== "" ? 1 : "Keep-current";
 
       // 欄位順序與 DA_External_Service 資料表一致
       previewRowsForSheet.push([
