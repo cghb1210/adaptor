@@ -9,6 +9,7 @@ function onOpen() {
       .addItem('產生 Seedance 帳單 Insert 語法', 'generateSeedanceExternalCostsSQL')
       .addItem('產生 Runpod 帳單 Insert 語法 (New, 解析選取範圍)', 'generateRunpodExternalCostsSQL')
       .addItem('產生 Tencent 帳單 Insert 語法', 'generateTencentExternalCostsSQL')
+      .addItem('產生 Tripo 帳單 Insert 語法', 'generateTripoExternalCostsSQL')
       .addItem('產生 Runpod 帳單 Insert 語法 (Legacy)', 'generateRunpodExternalCostsSQLLegacy')
       .addItem('產生 AWS SSM CLI for member limit 語法', 'generateAwsSsmCli')
       .addItem('產生 AWS SSM CLI for global limit 語法 (從 Finalized sheet)', 'generateQueueGroupCli')      
@@ -881,3 +882,135 @@ function generateQueueGroupCli() {
   }
 }
 
+
+
+function generateTripoExternalCostsSQL() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sourceSheet = ss.getSheetByName("Tripo - source");
+  const mappingSheet = ss.getSheetByName("Tripo - mapping");
+  
+  if (!sourceSheet || !mappingSheet) {
+    SpreadsheetApp.getUi().alert("找不到 'Tripo - source' 或 'Tripo - mapping' 工作表。");
+    return;
+  }
+
+                           
+  const mappingData = mappingSheet.getDataRange().getValues();
+  let idToQueue = {};
+  mappingData.slice(1).forEach(row => {
+    let appId = String(row[1] || '').trim();
+    if (appId) idToQueue[appId] = row[2];
+  });
+  
+                         
+  const sourceData = sourceSheet.getDataRange().getValues();
+  let groupTotals = {};
+  let unmatchedItems = [];
+
+                                   
+  sourceData.slice(1).forEach((row, index) => {
+    // 範例格式：B 欄為 Tripo ID，C 欄為 points；排除註記與先前輸出。
+    const appId = String(row[1] || '').trim();
+    if (!appId.startsWith('tcli_')) return;
+    const amount = Number(row[2]) / 100; // 100 points = 1 USD
+
+                           
+    if (!Number.isFinite(amount) || amount === 0) return;
+        
+    
+
+                 
+    const queueGroup = idToQueue[appId];
+    if (queueGroup) {
+      groupTotals[queueGroup] = (groupTotals[queueGroup] || 0) + amount;
+    } else {
+                                   
+      unmatchedItems.push(`- ${appId}: $${amount} (列號: ${index + 2})`);
+    }
+  });
+
+              
+  if (unmatchedItems.length > 0) {
+    // 修正 Alert 語法
+    SpreadsheetApp.getUi().alert("⚠ 發現未對應項目\n\n" + unmatchedItems.join("\n"));
+                                                             
+    return;
+  }
+
+                  
+                               
+             
+  const now = new Date();
+              
+  const lastDayOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+                                    
+                                       
+                   
+  const formattedDate = Utilities.formatDate(lastDayOfLastMonth, "GMT+8", "yyyy-MM-dd HH:mm:ss");
+
+
+           
+  let sqlStatements = [];
+  let sqlRowsForSheet = [];  // 用來存完整 SQL 指令的二維陣列
+  let previewRowsForSheet = []; // 新增：用來存資料預覽明細的二維陣列
+  
+  for (let queueGroup in groupTotals) {
+    const totalAmount = parseFloat(groupTotals[queueGroup].toFixed(4));
+    const sql = `INSERT INTO [Reallusion].[dbo].[DA_External_Costs] ([Time], [QueueGroup], [Amount], [Currency], [Provider]) VALUES ('${formattedDate}', '${queueGroup}', ${totalAmount.toFixed(4)}, 'USD', 'Tripo');`;
+    
+    sqlStatements.push(sql);
+    sqlRowsForSheet.push([sql]); 
+    
+    // 儲存預覽明細：[Time, QueueGroup, Amount, Currency, Provider]
+    previewRowsForSheet.push([formattedDate, queueGroup, totalAmount, 'USD', 'Tripo']);
+  }
+
+          
+  if (sqlStatements.length > 0) {
+    // 1. 保留原本功能：彈出視窗顯示 SQL
+    showOutputDialog(sqlStatements.join('\n'));
+    
+    // ==== 寫入工作表下方 ====
+    
+    let currentLastRow = sourceSheet.getLastRow();
+    
+    // ----------------------------------------------------
+    // 功能 A：建立「SQL 執行結果預覽表」(欄位拆開)
+    // ----------------------------------------------------
+    let previewStartRow = currentLastRow + 4; // 原資料下方空 3 行
+    
+    // 寫入大標題
+    sourceSheet.getRange(previewStartRow, 1)
+               .setValue("📊 SQL 執行結果預覽 (數據時間: " + formattedDate + ")")
+               .setFontWeight("bold")
+               .setBackground("#d9ead3"); // 綠色系大標題
+               
+    // 寫入欄位名稱 (第 1 欄到第 5 欄)
+    const headers = [["[Time]", "[QueueGroup]", "[Amount]", "[Currency]", "[Provider]"]];
+    sourceSheet.getRange(previewStartRow + 1, 1, 1, 5)
+               .setValues(headers)
+               .setFontWeight("bold")
+               .setBackground("#f3f3f3");
+               
+    // 寫入預覽資料明細
+    sourceSheet.getRange(previewStartRow + 2, 1, previewRowsForSheet.length, 5)
+               .setValues(previewRowsForSheet);
+    
+    // ----------------------------------------------------
+    // 功能 B：建立「SQL 完整指令列表」(方便整包複製)
+    // ----------------------------------------------------
+    // 重新計算目前的最後一行（因為剛剛填了預覽表）
+    currentLastRow = sourceSheet.getLastRow();
+    let sqlStartRow = currentLastRow + 3; // 預覽表下方空 2 行
+    
+    // 寫入 SQL 指令大標題
+    sourceSheet.getRange(sqlStartRow, 1)
+               .setValue("📜 產生的 SQL 原始指令列表")
+               .setFontWeight("bold")
+               .setBackground("#e6f2ff"); // 藍色系大標題
+    
+    // 寫入所有 SQL 指令
+    sourceSheet.getRange(sqlStartRow + 1, 1, sqlRowsForSheet.length, 1)
+               .setValues(sqlRowsForSheet);
+  }
+}
